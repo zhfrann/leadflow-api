@@ -1,0 +1,24 @@
+# Environment variables
+.env
+
+# Build output
+bin/
+dist/
+*.exe
+
+# Test output
+coverage.out
+coverage.html
+
+# Runtime files
+*.log
+tmp/
+
+# IDE
+.vscode/
+.idea/
+.zed/
+
+# Operating system
+.DS_Store
+Thumbs.db
