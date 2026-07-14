@@ -8,34 +8,62 @@ import (
 )
 
 const (
-	defaultEnvironment     = "development"
-	defaultHTTPAddress     = ":8080"
-	defaultShutdownTimeout = 10 * time.Second
-	defaultLogLevel        = "info"
+	defaultEnvironment           = "development"
+	defaultHTTPAddress           = ":8080"
+	defaultHTTPReadHeaderTimeout = 5 * time.Second
+	defaultHTTPReadTimeout       = 10 * time.Second
+	defaultHTTPWriteTimeout      = 30 * time.Second
+	defaultHTTPIdleTimeout       = 60 * time.Second
+	defaultShutdownTimeout       = 10 * time.Second
+	defaultLogLevel              = "info"
 )
 
 type Config struct {
-	Environment     string
-	HTTPAddress     string
-	ShutdownTimeout time.Duration
-	LogLevel        string
+	Environment           string
+	HTTPAddress           string
+	HTTPReadHeaderTimeout time.Duration
+	HTTPReadTimeout       time.Duration
+	HTTPWriteTimeout      time.Duration
+	HTTPIdleTimeout       time.Duration
+	ShutdownTimeout       time.Duration
+	LogLevel              string
 }
 
 func Load() (Config, error) {
-	cfg := Config{
-		Environment:     getEnv("APP_ENV", defaultEnvironment),
-		HTTPAddress:     getEnv("HTTP_ADDRESS", defaultHTTPAddress),
-		ShutdownTimeout: defaultShutdownTimeout,
-		LogLevel:        getEnv("LOG_LEVEL", defaultLogLevel),
+	readHeaderTimeout, err := getDurationEnv("HTTP_READ_HEADER_TIMEOUT", defaultHTTPReadHeaderTimeout)
+	if err != nil {
+		return Config{}, err
 	}
 
-	if value := strings.TrimSpace(os.Getenv("SHUTDOWN_TIMEOUT")); value != "" {
-		timeout, err := time.ParseDuration(value)
-		if err != nil {
-			return Config{}, fmt.Errorf("parse SHUTDOWN_TIMEOUT: %w", err)
-		}
+	readTimeout, err := getDurationEnv("HTTP_READ_TIMEOUT", defaultHTTPReadTimeout)
+	if err != nil {
+		return Config{}, err
+	}
 
-		cfg.ShutdownTimeout = timeout
+	writeTimeout, err := getDurationEnv("HTTP_WRITE_TIMEOUT", defaultHTTPWriteTimeout)
+	if err != nil {
+		return Config{}, err
+	}
+
+	idleTimeout, err := getDurationEnv("HTTP_IDLE_TIMEOUT", defaultHTTPIdleTimeout)
+	if err != nil {
+		return Config{}, err
+	}
+
+	shutdownTimeout, err := getDurationEnv("SHUTDOWN_TIMEOUT", defaultShutdownTimeout)
+	if err != nil {
+		return Config{}, err
+	}
+
+	cfg := Config{
+		Environment:           getEnv("APP_ENV", defaultEnvironment),
+		HTTPAddress:           getEnv("HTTP_ADDRESS", defaultHTTPAddress),
+		HTTPReadHeaderTimeout: readHeaderTimeout,
+		HTTPReadTimeout:       readTimeout,
+		HTTPWriteTimeout:      writeTimeout,
+		HTTPIdleTimeout:       idleTimeout,
+		ShutdownTimeout:       shutdownTimeout,
+		LogLevel:              getEnv("LOG_LEVEL", defaultLogLevel),
 	}
 
 	if err := cfg.validate(); err != nil {
@@ -54,6 +82,22 @@ func (c Config) validate() error {
 
 	if strings.TrimSpace(c.HTTPAddress) == "" {
 		return fmt.Errorf("HTTP_ADDRESS must not be empty")
+	}
+
+	if c.HTTPReadHeaderTimeout <= 0 {
+		return fmt.Errorf("HTTP_READ_HEADER_TIMEOUT must be greater than zero")
+	}
+
+	if c.HTTPReadTimeout <= 0 {
+		return fmt.Errorf("HTTP_READ_TIMEOUT must be greater than zero")
+	}
+
+	if c.HTTPWriteTimeout <= 0 {
+		return fmt.Errorf("HTTP_WRITE_TIMEOUT must be greater than zero")
+	}
+
+	if c.HTTPIdleTimeout <= 0 {
+		return fmt.Errorf("HTTP_IDLE_TIMEOUT must be greater than zero")
 	}
 
 	if c.ShutdownTimeout <= 0 {
@@ -76,4 +120,18 @@ func getEnv(key, fallback string) string {
 	}
 
 	return value
+}
+
+func getDurationEnv(key string, fallback time.Duration) (time.Duration, error) {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback, nil
+	}
+
+	duration, err := time.ParseDuration(value)
+	if err != nil {
+		return 0, fmt.Errorf("parse %s: %w", key, err)
+	}
+
+	return duration, nil
 }

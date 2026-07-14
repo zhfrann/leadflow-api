@@ -1,9 +1,17 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"log"
+	"log/slog"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/zhfrann/leadflow-api/internal/platform/config"
+	"github.com/zhfrann/leadflow-api/internal/platform/httpx"
 	"github.com/zhfrann/leadflow-api/internal/platform/logging"
 )
 
@@ -22,9 +30,80 @@ func main() {
 		log.Fatalf("initialize logger: %v", err)
 	}
 
-	logger.Info(
-		"application starting",
-		"address", cfg.HTTPAddress,
-		"shutdown_timeout", cfg.ShutdownTimeout.String(),
+	server := &http.Server{
+		Addr:              cfg.HTTPAddress,
+		Handler:           httpx.NewHandler(),
+		ReadHeaderTimeout: cfg.HTTPReadHeaderTimeout,
+		ReadTimeout:       cfg.HTTPReadTimeout,
+		WriteTimeout:      cfg.HTTPWriteTimeout,
+		IdleTimeout:       cfg.HTTPIdleTimeout,
+		ErrorLog: slog.NewLogLogger(
+			logger.Handler(),
+			slog.LevelError,
+		),
+	}
+
+	signalContext, stop := signal.NotifyContext(
+		context.Background(),
+		os.Interrupt,
+		syscall.SIGTERM,
 	)
+	defer stop()
+
+	serverErrors := make(chan error, 1)
+
+	go func() {
+		logger.Info(
+			"HTTP server starting",
+			"address", cfg.HTTPAddress,
+		)
+
+		serverErrors <- server.ListenAndServe()
+	}()
+
+	select {
+	case err := <-serverErrors:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Error(
+				"HTTP server stopped unexpectedly",
+				"error", err,
+			)
+			os.Exit(1)
+		}
+
+	case <-signalContext.Done():
+		logger.Info("shutdown signal received")
+
+		shutdownContext, cancel := context.WithTimeout(
+			context.Background(),
+			cfg.ShutdownTimeout,
+		)
+		defer cancel()
+
+		if err := server.Shutdown(shutdownContext); err != nil {
+			logger.Error(
+				"graceful shutdown failed",
+				"error", err,
+			)
+
+			if closeErr := server.Close(); closeErr != nil {
+				logger.Error(
+					"force close HTTP server failed",
+					"error", closeErr,
+				)
+			}
+
+			os.Exit(1)
+		}
+
+		if err := <-serverErrors; err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Error(
+				"HTTP server shutdown failed",
+				"error", err,
+			)
+			os.Exit(1)
+		}
+
+		logger.Info("application stopped")
+	}
 }
