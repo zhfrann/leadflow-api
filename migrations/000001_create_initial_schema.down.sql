@@ -1,0 +1,3 @@
+DROP TABLE IF EXISTS email_outbox;
+DROP TABLE IF EXISTS contacts;
+DROP TABLE IF EXISTS users;
