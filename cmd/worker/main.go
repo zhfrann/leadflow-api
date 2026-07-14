@@ -83,6 +83,15 @@ func main() {
 		hostname = "unknown-host"
 	}
 
+	retryPolicy, err := notification.NewRetryPolicy(cfg.WorkerRetryDelays)
+	if err != nil {
+		logger.Error(
+			"initialize email retry policy",
+			"error", err,
+		)
+		os.Exit(1)
+	}
+
 	workerID := fmt.Sprintf(
 		"%s-%d",
 		hostname,
@@ -100,7 +109,9 @@ func main() {
 		logger,
 		workerID,
 		cfg.WorkerPollInterval,
-		cfg.WorkerRetryDelay,
+		retryPolicy,
+		cfg.WorkerProcessingTimeout,
+		cfg.WorkerRecoveryInterval,
 	)
 
 	if err := worker.Run(ctx); err != nil {

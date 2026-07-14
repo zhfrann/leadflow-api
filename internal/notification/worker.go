@@ -13,13 +13,18 @@ import (
 const userRegisteredEvent = "USER_REGISTERED"
 
 type Worker struct {
-	repository   Repository
-	sender       mailx.Sender
-	templates    *Templates
-	logger       *slog.Logger
-	workerID     string
-	pollInterval time.Duration
-	retryDelay   time.Duration
+	repository Repository
+	sender     mailx.Sender
+	templates  *Templates
+	logger     *slog.Logger
+	workerID   string
+
+	pollInterval      time.Duration
+	retryPolicy       RetryPolicy
+	processingTimeout time.Duration
+	recoveryInterval  time.Duration
+
+	now func() time.Time
 }
 
 func NewWorker(
@@ -29,16 +34,21 @@ func NewWorker(
 	logger *slog.Logger,
 	workerID string,
 	pollInterval time.Duration,
-	retryDelay time.Duration,
+	retryPolicy RetryPolicy,
+	processingTimeout time.Duration,
+	recoveryInterval time.Duration,
 ) *Worker {
 	return &Worker{
-		repository:   repository,
-		sender:       sender,
-		templates:    templates,
-		logger:       logger,
-		workerID:     workerID,
-		pollInterval: pollInterval,
-		retryDelay:   retryDelay,
+		repository:        repository,
+		sender:            sender,
+		templates:         templates,
+		logger:            logger,
+		workerID:          workerID,
+		pollInterval:      pollInterval,
+		retryPolicy:       retryPolicy,
+		processingTimeout: processingTimeout,
+		recoveryInterval:  recoveryInterval,
+		now:               time.Now,
 	}
 }
 
@@ -46,12 +56,29 @@ func (w *Worker) Run(ctx context.Context) error {
 	w.logger.Info(
 		"email worker started",
 		"worker_id", w.workerID,
+		"max_attempts", w.retryPolicy.MaxAttempts(),
 	)
+
+	var lastRecovery time.Time
 
 	for {
 		if ctx.Err() != nil {
 			w.logger.Info("email worker stopping")
 			return nil
+		}
+
+		now := w.now().UTC()
+
+		if lastRecovery.IsZero() ||
+			now.Sub(lastRecovery) >= w.recoveryInterval {
+			if err := w.recoverStuck(ctx, now); err != nil {
+				w.logger.Error(
+					"recover stuck email failed",
+					"error", err,
+				)
+			}
+
+			lastRecovery = now
 		}
 
 		processed, err := w.processOne(ctx)
@@ -83,9 +110,7 @@ func (w *Worker) Run(ctx context.Context) error {
 	}
 }
 
-func (w *Worker) processOne(
-	ctx context.Context,
-) (bool, error) {
+func (w *Worker) processOne(ctx context.Context) (bool, error) {
 	outbox, found, err := w.repository.ClaimPending(
 		ctx,
 		w.workerID,
@@ -159,9 +184,41 @@ func (w *Worker) processOne(
 	startedAt := time.Now()
 
 	if err := w.sender.Send(ctx, emailMessage); err != nil {
-		nextAttemptAt := time.Now().
+		failedAttempts := outbox.AttemptCount + 1
+
+		if !w.retryPolicy.ShouldRetry(failedAttempts) {
+			if markErr := w.repository.MarkFailed(
+				ctx,
+				outbox.ID,
+				w.workerID,
+				err.Error(),
+			); markErr != nil {
+				return true, fmt.Errorf(
+					"email delivery failed and marking FAILED failed: %w",
+					markErr,
+				)
+			}
+
+			w.logger.Error(
+				"email delivery permanently failed",
+				"outbox_id", outbox.ID,
+				"event_type", outbox.EventType,
+				"attempt_count", failedAttempts,
+			)
+
+			return true, nil
+		}
+
+		retryDelay, delayErr := w.retryPolicy.Delay(
+			failedAttempts,
+		)
+		if delayErr != nil {
+			return true, delayErr
+		}
+
+		nextAttemptAt := w.now().
 			UTC().
-			Add(w.retryDelay)
+			Add(retryDelay)
 
 		if markErr := w.repository.MarkRetry(
 			ctx,
@@ -171,7 +228,7 @@ func (w *Worker) processOne(
 			err.Error(),
 		); markErr != nil {
 			return true, fmt.Errorf(
-				"send email failed and retry scheduling failed: %w",
+				"email delivery failed and retry scheduling failed: %w",
 				markErr,
 			)
 		}
@@ -180,7 +237,8 @@ func (w *Worker) processOne(
 			"email delivery scheduled for retry",
 			"outbox_id", outbox.ID,
 			"event_type", outbox.EventType,
-			"attempt_count", outbox.AttemptCount+1,
+			"attempt_count", failedAttempts,
+			"retry_delay", retryDelay.String(),
 			"next_attempt_at", nextAttemptAt,
 		)
 
@@ -203,4 +261,28 @@ func (w *Worker) processOne(
 	)
 
 	return true, nil
+}
+
+func (w *Worker) recoverStuck(ctx context.Context, now time.Time) error {
+	lockedBefore := now.Add(
+		-w.processingTimeout,
+	)
+
+	recovered, err := w.repository.RecoverStuck(
+		ctx,
+		lockedBefore,
+	)
+	if err != nil {
+		return err
+	}
+
+	if recovered > 0 {
+		w.logger.Warn(
+			"stuck email messages recovered",
+			"count", recovered,
+			"locked_before", lockedBefore,
+		)
+	}
+
+	return nil
 }

@@ -25,31 +25,45 @@ const (
 	defaultMailFromName                 = "LeadFlow"
 	defaultMailFromAddress              = "no-reply@leadflow.local"
 	defaultMailTimeout                  = 10 * time.Second
-	defaultWorkerPollInterval           = 1 * time.Second
 	defaultWorkerRetryDelay             = 10 * time.Second
 )
 
 type Config struct {
-	Environment            string
-	HTTPAddress            string
-	HTTPReadHeaderTimeout  time.Duration
-	HTTPReadTimeout        time.Duration
-	HTTPWriteTimeout       time.Duration
-	HTTPIdleTimeout        time.Duration
-	ShutdownTimeout        time.Duration
-	LogLevel               string
-	DatabaseURL            string
-	DatabaseConnectTimeout time.Duration
-	DatabaseHealthTimeout  time.Duration
-	DatabaseMaxConns       int32
-	MailSMTPAddress        string
-	MailSMTPHost           string
-	MailFromName           string
-	MailFromAddress        string
-	MailTimeout            time.Duration
-	WorkerPollInterval     time.Duration
-	WorkerRetryDelay       time.Duration
+	Environment             string
+	HTTPAddress             string
+	HTTPReadHeaderTimeout   time.Duration
+	HTTPReadTimeout         time.Duration
+	HTTPWriteTimeout        time.Duration
+	HTTPIdleTimeout         time.Duration
+	ShutdownTimeout         time.Duration
+	LogLevel                string
+	DatabaseURL             string
+	DatabaseConnectTimeout  time.Duration
+	DatabaseHealthTimeout   time.Duration
+	DatabaseMaxConns        int32
+	MailSMTPAddress         string
+	MailSMTPHost            string
+	MailFromName            string
+	MailFromAddress         string
+	MailTimeout             time.Duration
+	WorkerPollInterval      time.Duration
+	WorkerRetryDelays       []time.Duration
+	WorkerProcessingTimeout time.Duration
+	WorkerRecoveryInterval  time.Duration
 }
+
+var defaultWorkerRetryDelays = []time.Duration{
+	10 * time.Second,
+	30 * time.Second,
+	2 * time.Minute,
+	10 * time.Minute,
+}
+
+const (
+	defaultWorkerPollInterval      = 1 * time.Second
+	defaultWorkerProcessingTimeout = 2 * time.Minute
+	defaultWorkerRecoveryInterval  = 30 * time.Second
+)
 
 func Load() (Config, error) {
 	readHeaderTimeout, err := getDurationEnv("HTTP_READ_HEADER_TIMEOUT", defaultHTTPReadHeaderTimeout)
@@ -102,31 +116,43 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
-	workerRetryDelay, err := getDurationEnv("WORKER_RETRY_DELAY", defaultWorkerRetryDelay)
+	workerRetryDelays, err := getDurationListEnv("WORKER_RETRY_DELAYS", defaultWorkerRetryDelays)
+	if err != nil {
+		return Config{}, err
+	}
+
+	workerProcessingTimeout, err := getDurationEnv("WORKER_PROCESSING_TIMEOUT", defaultWorkerProcessingTimeout)
+	if err != nil {
+		return Config{}, err
+	}
+
+	workerRecoveryInterval, err := getDurationEnv("WORKER_RECOVERY_INTERVAL", defaultWorkerRecoveryInterval)
 	if err != nil {
 		return Config{}, err
 	}
 
 	cfg := Config{
-		Environment:            getEnv("APP_ENV", defaultEnvironment),
-		HTTPAddress:            getEnv("HTTP_ADDRESS", defaultHTTPAddress),
-		HTTPReadHeaderTimeout:  readHeaderTimeout,
-		HTTPReadTimeout:        readTimeout,
-		HTTPWriteTimeout:       writeTimeout,
-		HTTPIdleTimeout:        idleTimeout,
-		ShutdownTimeout:        shutdownTimeout,
-		LogLevel:               getEnv("LOG_LEVEL", defaultLogLevel),
-		DatabaseURL:            strings.TrimSpace(os.Getenv("DATABASE_URL")),
-		DatabaseConnectTimeout: databaseConnectTimeout,
-		DatabaseHealthTimeout:  databaseHealthTimeout,
-		DatabaseMaxConns:       databaseMaxConns,
-		MailSMTPAddress:        getEnv("MAIL_SMTP_ADDRESS", defaultMailSMTPAddress),
-		MailSMTPHost:           getEnv("MAIL_SMTP_HOST", defaultMailSMTPHost),
-		MailFromName:           getEnv("MAIL_FROM_NAME", defaultMailFromName),
-		MailFromAddress:        getEnv("MAIL_FROM_ADDRESS", defaultMailFromAddress),
-		MailTimeout:            mailTimeout,
-		WorkerPollInterval:     workerPollInterval,
-		WorkerRetryDelay:       workerRetryDelay,
+		Environment:             getEnv("APP_ENV", defaultEnvironment),
+		HTTPAddress:             getEnv("HTTP_ADDRESS", defaultHTTPAddress),
+		HTTPReadHeaderTimeout:   readHeaderTimeout,
+		HTTPReadTimeout:         readTimeout,
+		HTTPWriteTimeout:        writeTimeout,
+		HTTPIdleTimeout:         idleTimeout,
+		ShutdownTimeout:         shutdownTimeout,
+		LogLevel:                getEnv("LOG_LEVEL", defaultLogLevel),
+		DatabaseURL:             strings.TrimSpace(os.Getenv("DATABASE_URL")),
+		DatabaseConnectTimeout:  databaseConnectTimeout,
+		DatabaseHealthTimeout:   databaseHealthTimeout,
+		DatabaseMaxConns:        databaseMaxConns,
+		MailSMTPAddress:         getEnv("MAIL_SMTP_ADDRESS", defaultMailSMTPAddress),
+		MailSMTPHost:            getEnv("MAIL_SMTP_HOST", defaultMailSMTPHost),
+		MailFromName:            getEnv("MAIL_FROM_NAME", defaultMailFromName),
+		MailFromAddress:         getEnv("MAIL_FROM_ADDRESS", defaultMailFromAddress),
+		MailTimeout:             mailTimeout,
+		WorkerPollInterval:      workerPollInterval,
+		WorkerRetryDelays:       workerRetryDelays,
+		WorkerProcessingTimeout: workerProcessingTimeout,
+		WorkerRecoveryInterval:  workerRecoveryInterval,
 	}
 
 	if err := cfg.validate(); err != nil {
@@ -200,15 +226,25 @@ func (c Config) validate() error {
 	}
 
 	if c.WorkerPollInterval <= 0 {
-		return fmt.Errorf(
-			"WORKER_POLL_INTERVAL must be greater than zero",
-		)
+		return fmt.Errorf("WORKER_POLL_INTERVAL must be greater than zero")
 	}
 
-	if c.WorkerRetryDelay <= 0 {
-		return fmt.Errorf(
-			"WORKER_RETRY_DELAY must be greater than zero",
-		)
+	if len(c.WorkerRetryDelays) == 0 {
+		return fmt.Errorf("WORKER_RETRY_DELAYS must contain at least one duration")
+	}
+
+	for _, delay := range c.WorkerRetryDelays {
+		if delay <= 0 {
+			return fmt.Errorf("WORKER_RETRY_DELAYS must contain positive durations")
+		}
+	}
+
+	if c.WorkerProcessingTimeout <= c.MailTimeout {
+		return fmt.Errorf("WORKER_PROCESSING_TIMEOUT must be greater than MAIL_TIMEOUT")
+	}
+
+	if c.WorkerRecoveryInterval <= 0 {
+		return fmt.Errorf("WORKER_RECOVERY_INTERVAL must be greater than zero")
 	}
 
 	switch c.LogLevel {
@@ -255,4 +291,33 @@ func getInt32Env(key string, fallback int32) (int32, error) {
 	}
 
 	return int32(parsed), nil
+}
+
+func getDurationListEnv(key string, fallback []time.Duration) ([]time.Duration, error) {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		result := make([]time.Duration, len(fallback))
+		copy(result, fallback)
+
+		return result, nil
+	}
+
+	parts := strings.Split(value, ",")
+	result := make([]time.Duration, 0, len(parts))
+
+	for index, part := range parts {
+		duration, err := time.ParseDuration(strings.TrimSpace(part))
+		if err != nil {
+			return nil, fmt.Errorf("parse %s item %d: %w", key, index+1, err)
+		}
+
+		if duration <= 0 {
+			return nil, fmt.Errorf(
+				"%s item %d must be greater than zero", key, index+1)
+		}
+
+		result = append(result, duration)
+	}
+
+	return result, nil
 }

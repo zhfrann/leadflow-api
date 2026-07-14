@@ -45,6 +45,11 @@ type Repository interface {
 		workerID string,
 		lastError string,
 	) error
+
+	RecoverStuck(
+		ctx context.Context,
+		lockedBefore time.Time,
+	) (int64, error)
 }
 
 type PostgresRepository struct {
@@ -253,4 +258,36 @@ func (r *PostgresRepository) MarkFailed(
 	}
 
 	return nil
+}
+
+func (r *PostgresRepository) RecoverStuck(
+	ctx context.Context,
+	lockedBefore time.Time,
+) (int64, error) {
+	commandTag, err := r.pool.Exec(
+		ctx,
+		`
+			UPDATE email_outbox
+			SET
+				status = 'PENDING',
+				next_attempt_at = NOW(),
+				last_error = 'recovered after processing timeout',
+				processing_started_at = NULL,
+				locked_at = NULL,
+				locked_by = NULL,
+				updated_at = NOW()
+			WHERE status = 'PROCESSING'
+			  AND locked_at IS NOT NULL
+			  AND locked_at <= $1
+		`,
+		lockedBefore,
+	)
+	if err != nil {
+		return 0, fmt.Errorf(
+			"recover stuck outbox messages: %w",
+			err,
+		)
+	}
+
+	return commandTag.RowsAffected(), nil
 }
