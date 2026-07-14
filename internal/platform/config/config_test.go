@@ -7,7 +7,18 @@ import (
 	"github.com/zhfrann/leadflow-api/internal/platform/config"
 )
 
+func setRequiredEnvironment(t *testing.T) {
+	t.Helper()
+
+	t.Setenv(
+		"DATABASE_URL",
+		"postgres://leadflow:password@localhost:5432/leadflow",
+	)
+}
+
 func TestLoadUsesDefaultValues(t *testing.T) {
+	setRequiredEnvironment(t)
+
 	t.Setenv("APP_ENV", "")
 	t.Setenv("HTTP_ADDRESS", "")
 	t.Setenv("SHUTDOWN_TIMEOUT", "")
@@ -45,9 +56,25 @@ func TestLoadUsesDefaultValues(t *testing.T) {
 			cfg.LogLevel,
 		)
 	}
+
+	if cfg.DatabaseConnectTimeout != 5*time.Second {
+		t.Errorf(
+			"expected database connect timeout 5s, got %s",
+			cfg.DatabaseConnectTimeout,
+		)
+	}
+
+	if cfg.DatabaseMaxConns != 10 {
+		t.Errorf(
+			"expected database max connections 10, got %d",
+			cfg.DatabaseMaxConns,
+		)
+	}
 }
 
 func TestLoadReadsEnvironmentVariables(t *testing.T) {
+	setRequiredEnvironment(t)
+
 	t.Setenv("APP_ENV", "production")
 	t.Setenv("HTTP_ADDRESS", ":9000")
 	t.Setenv("SHUTDOWN_TIMEOUT", "20s")
@@ -88,6 +115,8 @@ func TestLoadReadsEnvironmentVariables(t *testing.T) {
 }
 
 func TestLoadRejectsInvalidShutdownTimeout(t *testing.T) {
+	setRequiredEnvironment(t)
+
 	t.Setenv("SHUTDOWN_TIMEOUT", "invalid-duration")
 
 	_, err := config.Load()
@@ -97,6 +126,8 @@ func TestLoadRejectsInvalidShutdownTimeout(t *testing.T) {
 }
 
 func TestLoadRejectsInvalidEnvironment(t *testing.T) {
+	setRequiredEnvironment(t)
+
 	t.Setenv("APP_ENV", "staging")
 
 	_, err := config.Load()

@@ -3,30 +3,38 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
 
 const (
-	defaultEnvironment           = "development"
-	defaultHTTPAddress           = ":8080"
-	defaultHTTPReadHeaderTimeout = 5 * time.Second
-	defaultHTTPReadTimeout       = 10 * time.Second
-	defaultHTTPWriteTimeout      = 30 * time.Second
-	defaultHTTPIdleTimeout       = 60 * time.Second
-	defaultShutdownTimeout       = 10 * time.Second
-	defaultLogLevel              = "info"
+	defaultEnvironment                  = "development"
+	defaultHTTPAddress                  = ":8080"
+	defaultHTTPReadHeaderTimeout        = 5 * time.Second
+	defaultHTTPReadTimeout              = 10 * time.Second
+	defaultHTTPWriteTimeout             = 30 * time.Second
+	defaultHTTPIdleTimeout              = 60 * time.Second
+	defaultShutdownTimeout              = 10 * time.Second
+	defaultLogLevel                     = "info"
+	defaultDatabaseConnectTimeout       = 5 * time.Second
+	defaultDatabaseHealthTimeout        = 2 * time.Second
+	defaultDatabaseMaxConns       int32 = 10
 )
 
 type Config struct {
-	Environment           string
-	HTTPAddress           string
-	HTTPReadHeaderTimeout time.Duration
-	HTTPReadTimeout       time.Duration
-	HTTPWriteTimeout      time.Duration
-	HTTPIdleTimeout       time.Duration
-	ShutdownTimeout       time.Duration
-	LogLevel              string
+	Environment            string
+	HTTPAddress            string
+	HTTPReadHeaderTimeout  time.Duration
+	HTTPReadTimeout        time.Duration
+	HTTPWriteTimeout       time.Duration
+	HTTPIdleTimeout        time.Duration
+	ShutdownTimeout        time.Duration
+	LogLevel               string
+	DatabaseURL            string
+	DatabaseConnectTimeout time.Duration
+	DatabaseHealthTimeout  time.Duration
+	DatabaseMaxConns       int32
 }
 
 func Load() (Config, error) {
@@ -55,15 +63,34 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
+	databaseConnectTimeout, err := getDurationEnv("DATABASE_CONNECT_TIMEOUT", defaultDatabaseConnectTimeout)
+	if err != nil {
+		return Config{}, err
+	}
+
+	databaseHealthTimeout, err := getDurationEnv("DATABASE_HEALTH_TIMEOUT", defaultDatabaseHealthTimeout)
+	if err != nil {
+		return Config{}, err
+	}
+
+	databaseMaxConns, err := getInt32Env("DATABASE_MAX_CONNS", defaultDatabaseMaxConns)
+	if err != nil {
+		return Config{}, err
+	}
+
 	cfg := Config{
-		Environment:           getEnv("APP_ENV", defaultEnvironment),
-		HTTPAddress:           getEnv("HTTP_ADDRESS", defaultHTTPAddress),
-		HTTPReadHeaderTimeout: readHeaderTimeout,
-		HTTPReadTimeout:       readTimeout,
-		HTTPWriteTimeout:      writeTimeout,
-		HTTPIdleTimeout:       idleTimeout,
-		ShutdownTimeout:       shutdownTimeout,
-		LogLevel:              getEnv("LOG_LEVEL", defaultLogLevel),
+		Environment:            getEnv("APP_ENV", defaultEnvironment),
+		HTTPAddress:            getEnv("HTTP_ADDRESS", defaultHTTPAddress),
+		HTTPReadHeaderTimeout:  readHeaderTimeout,
+		HTTPReadTimeout:        readTimeout,
+		HTTPWriteTimeout:       writeTimeout,
+		HTTPIdleTimeout:        idleTimeout,
+		ShutdownTimeout:        shutdownTimeout,
+		LogLevel:               getEnv("LOG_LEVEL", defaultLogLevel),
+		DatabaseURL:            strings.TrimSpace(os.Getenv("DATABASE_URL")),
+		DatabaseConnectTimeout: databaseConnectTimeout,
+		DatabaseHealthTimeout:  databaseHealthTimeout,
+		DatabaseMaxConns:       databaseMaxConns,
 	}
 
 	if err := cfg.validate(); err != nil {
@@ -104,6 +131,22 @@ func (c Config) validate() error {
 		return fmt.Errorf("SHUTDOWN_TIMEOUT must be greater than zero")
 	}
 
+	if c.DatabaseURL == "" {
+		return fmt.Errorf("DATABASE_URL must not be empty")
+	}
+
+	if c.DatabaseConnectTimeout <= 0 {
+		return fmt.Errorf("DATABASE_CONNECT_TIMEOUT must be greater than zero")
+	}
+
+	if c.DatabaseHealthTimeout <= 0 {
+		return fmt.Errorf("DATABASE_HEALTH_TIMEOUT must be greater than zero")
+	}
+
+	if c.DatabaseMaxConns <= 0 {
+		return fmt.Errorf("DATABASE_MAX_CONNS must be greater than zero")
+	}
+
 	switch c.LogLevel {
 	case "debug", "info", "warn", "error":
 	default:
@@ -134,4 +177,18 @@ func getDurationEnv(key string, fallback time.Duration) (time.Duration, error) {
 	}
 
 	return duration, nil
+}
+
+func getInt32Env(key string, fallback int32) (int32, error) {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback, nil
+	}
+
+	parsed, err := strconv.ParseInt(value, 10, 32)
+	if err != nil {
+		return 0, fmt.Errorf("parse %s: %w", key, err)
+	}
+
+	return int32(parsed), nil
 }

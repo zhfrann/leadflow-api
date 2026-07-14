@@ -11,6 +11,7 @@ import (
 	"syscall"
 
 	"github.com/zhfrann/leadflow-api/internal/platform/config"
+	"github.com/zhfrann/leadflow-api/internal/platform/database"
 	"github.com/zhfrann/leadflow-api/internal/platform/httpx"
 	"github.com/zhfrann/leadflow-api/internal/platform/logging"
 )
@@ -30,9 +31,30 @@ func main() {
 		log.Fatalf("initialize logger: %v", err)
 	}
 
+	postgresPool, err := database.NewPostgresPool(
+		context.Background(),
+		database.PostgresConfig{
+			URL:            cfg.DatabaseURL,
+			ConnectTimeout: cfg.DatabaseConnectTimeout,
+			MaxConns:       cfg.DatabaseMaxConns,
+		},
+	)
+	if err != nil {
+		logger.Error(
+			"initialize PostgreSQL",
+			"error", err,
+		)
+	}
+	defer postgresPool.Close()
+
+	logger.Info(
+		"PostgreSQL connection established",
+		"max_connections", cfg.DatabaseMaxConns,
+	)
+
 	server := &http.Server{
 		Addr:              cfg.HTTPAddress,
-		Handler:           httpx.NewHandler(),
+		Handler:           httpx.NewHandler(postgresPool, cfg.DatabaseHealthTimeout),
 		ReadHeaderTimeout: cfg.HTTPReadHeaderTimeout,
 		ReadTimeout:       cfg.HTTPReadTimeout,
 		WriteTimeout:      cfg.HTTPWriteTimeout,
