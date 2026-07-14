@@ -8,16 +8,13 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/zhfrann/leadflow-api/internal/notification"
 )
 
 const (
 	userEmailUniqueConstraint = "users_email_unique_idx"
 )
-
-type welcomeEmailPayload struct {
-	UserID int64  `json:"user_id"`
-	Email  string `json:"email"`
-}
 
 type PostgresRepository struct {
 	pool *pgxpool.Pool
@@ -63,10 +60,12 @@ func (r *PostgresRepository) CreateUserWithWelcomeEmail(ctx context.Context, par
 		return User{}, fmt.Errorf("insert user: %w", err)
 	}
 
-	payload, err := json.Marshal(welcomeEmailPayload{
-		UserID: user.ID,
-		Email:  user.Email,
-	})
+	payload, err := json.Marshal(
+		notification.UserRegisteredPayload{
+			UserID: user.ID,
+			Email:  user.Email,
+		},
+	)
 	if err != nil {
 		return User{}, fmt.Errorf("marshal welcome email payload: %w", err)
 	}

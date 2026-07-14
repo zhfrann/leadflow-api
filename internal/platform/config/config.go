@@ -20,6 +20,13 @@ const (
 	defaultDatabaseConnectTimeout       = 5 * time.Second
 	defaultDatabaseHealthTimeout        = 2 * time.Second
 	defaultDatabaseMaxConns       int32 = 10
+	defaultMailSMTPAddress              = "localhost:1025"
+	defaultMailSMTPHost                 = "localhost"
+	defaultMailFromName                 = "LeadFlow"
+	defaultMailFromAddress              = "no-reply@leadflow.local"
+	defaultMailTimeout                  = 10 * time.Second
+	defaultWorkerPollInterval           = 1 * time.Second
+	defaultWorkerRetryDelay             = 10 * time.Second
 )
 
 type Config struct {
@@ -35,6 +42,13 @@ type Config struct {
 	DatabaseConnectTimeout time.Duration
 	DatabaseHealthTimeout  time.Duration
 	DatabaseMaxConns       int32
+	MailSMTPAddress        string
+	MailSMTPHost           string
+	MailFromName           string
+	MailFromAddress        string
+	MailTimeout            time.Duration
+	WorkerPollInterval     time.Duration
+	WorkerRetryDelay       time.Duration
 }
 
 func Load() (Config, error) {
@@ -78,6 +92,21 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
+	mailTimeout, err := getDurationEnv("MAIL_TIMEOUT", defaultMailTimeout)
+	if err != nil {
+		return Config{}, err
+	}
+
+	workerPollInterval, err := getDurationEnv("WORKER_POLL_INTERVAL", defaultWorkerPollInterval)
+	if err != nil {
+		return Config{}, err
+	}
+
+	workerRetryDelay, err := getDurationEnv("WORKER_RETRY_DELAY", defaultWorkerRetryDelay)
+	if err != nil {
+		return Config{}, err
+	}
+
 	cfg := Config{
 		Environment:            getEnv("APP_ENV", defaultEnvironment),
 		HTTPAddress:            getEnv("HTTP_ADDRESS", defaultHTTPAddress),
@@ -91,6 +120,13 @@ func Load() (Config, error) {
 		DatabaseConnectTimeout: databaseConnectTimeout,
 		DatabaseHealthTimeout:  databaseHealthTimeout,
 		DatabaseMaxConns:       databaseMaxConns,
+		MailSMTPAddress:        getEnv("MAIL_SMTP_ADDRESS", defaultMailSMTPAddress),
+		MailSMTPHost:           getEnv("MAIL_SMTP_HOST", defaultMailSMTPHost),
+		MailFromName:           getEnv("MAIL_FROM_NAME", defaultMailFromName),
+		MailFromAddress:        getEnv("MAIL_FROM_ADDRESS", defaultMailFromAddress),
+		MailTimeout:            mailTimeout,
+		WorkerPollInterval:     workerPollInterval,
+		WorkerRetryDelay:       workerRetryDelay,
 	}
 
 	if err := cfg.validate(); err != nil {
@@ -145,6 +181,34 @@ func (c Config) validate() error {
 
 	if c.DatabaseMaxConns <= 0 {
 		return fmt.Errorf("DATABASE_MAX_CONNS must be greater than zero")
+	}
+
+	if strings.TrimSpace(c.MailSMTPAddress) == "" {
+		return fmt.Errorf("MAIL_SMTP_ADDRESS must not be empty")
+	}
+
+	if strings.TrimSpace(c.MailSMTPHost) == "" {
+		return fmt.Errorf("MAIL_SMTP_HOST must not be empty")
+	}
+
+	if strings.TrimSpace(c.MailFromAddress) == "" {
+		return fmt.Errorf("MAIL_FROM_ADDRESS must not be empty")
+	}
+
+	if c.MailTimeout <= 0 {
+		return fmt.Errorf("MAIL_TIMEOUT must be greater than zero")
+	}
+
+	if c.WorkerPollInterval <= 0 {
+		return fmt.Errorf(
+			"WORKER_POLL_INTERVAL must be greater than zero",
+		)
+	}
+
+	if c.WorkerRetryDelay <= 0 {
+		return fmt.Errorf(
+			"WORKER_RETRY_DELAY must be greater than zero",
+		)
 	}
 
 	switch c.LogLevel {
