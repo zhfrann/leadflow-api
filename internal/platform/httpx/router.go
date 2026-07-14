@@ -2,7 +2,6 @@ package httpx
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"time"
 )
@@ -11,17 +10,37 @@ type ReadinessChecker interface {
 	Ping(ctx context.Context) error
 }
 
+type RouterConfig struct {
+	Database         ReadinessChecker
+	ReadinessTimeout time.Duration
+	RegisterHandler  http.HandlerFunc
+}
+
 type statusResponse struct {
 	Status string `json:"status"`
 }
 
-func NewHandler(database ReadinessChecker, readinessTimeout time.Duration) http.Handler {
+func NewHandler(cfg RouterConfig) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /health", handleHealth)
-	mux.HandleFunc("GET /ready", handleReady(database, readinessTimeout))
+	mux.HandleFunc("GET /ready", handleReady(cfg.Database, cfg.ReadinessTimeout))
 
-	return mux
+	if cfg.RegisterHandler != nil {
+		mux.HandleFunc("POST /v1/auth/register", cfg.RegisterHandler)
+	}
+
+	return RequestID(mux)
+}
+
+func handleHealth(w http.ResponseWriter, _ *http.Request) {
+	_ = WriteJSON(
+		w,
+		http.StatusOK,
+		statusResponse{
+			Status: "ok",
+		},
+	)
 }
 
 func handleReady(database ReadinessChecker, timeout time.Duration) http.HandlerFunc {
@@ -30,24 +49,22 @@ func handleReady(database ReadinessChecker, timeout time.Duration) http.HandlerF
 		defer cancel()
 
 		if err := database.Ping(ctx); err != nil {
-			writeStatus(w, http.StatusServiceUnavailable, "unavailable")
+			_ = WriteJSON(
+				w,
+				http.StatusServiceUnavailable,
+				statusResponse{
+					Status: "unavailable",
+				},
+			)
 			return
 		}
 
-		writeStatus(w, http.StatusOK, "ready")
+		_ = WriteJSON(
+			w,
+			http.StatusOK,
+			statusResponse{
+				Status: "ready",
+			},
+		)
 	}
-}
-
-func handleHealth(w http.ResponseWriter, _ *http.Request) {
-	writeStatus(w, http.StatusOK, "ok")
-}
-
-func writeStatus(w http.ResponseWriter, statusCode int, status string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(statusCode)
-
-	_ = json.NewEncoder(w).Encode(statusResponse{
-		Status: status,
-	})
 }

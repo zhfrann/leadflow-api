@@ -24,7 +24,10 @@ func TestHealthEndpoint(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/health", nil)
 	recorder := httptest.NewRecorder()
 
-	handler := httpx.NewHandler(stubReadinessChecker{}, time.Second)
+	handler := httpx.NewHandler(httpx.RouterConfig{
+		Database:         stubReadinessChecker{},
+		ReadinessTimeout: time.Second,
+	})
 	handler.ServeHTTP(recorder, request)
 
 	if recorder.Code != http.StatusOK {
@@ -60,7 +63,10 @@ func TestHealthEndpointRejectsUnsupportedMethod(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/health", nil)
 	recorder := httptest.NewRecorder()
 
-	handler := httpx.NewHandler(stubReadinessChecker{}, time.Second)
+	handler := httpx.NewHandler(httpx.RouterConfig{
+		Database:         stubReadinessChecker{},
+		ReadinessTimeout: time.Second,
+	})
 	handler.ServeHTTP(recorder, request)
 
 	if recorder.Code != http.StatusMethodNotAllowed {
@@ -76,7 +82,10 @@ func TestReadyEndpoint(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/ready", nil)
 	recorder := httptest.NewRecorder()
 
-	handler := httpx.NewHandler(stubReadinessChecker{}, time.Second)
+	handler := httpx.NewHandler(httpx.RouterConfig{
+		Database:         stubReadinessChecker{},
+		ReadinessTimeout: time.Second,
+	})
 
 	handler.ServeHTTP(recorder, request)
 
@@ -89,12 +98,12 @@ func TestReadyEndpointWhenDatabaseUnavailable(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/ready", nil)
 	recorder := httptest.NewRecorder()
 
-	handler := httpx.NewHandler(
-		stubReadinessChecker{
+	handler := httpx.NewHandler(httpx.RouterConfig{
+		Database: stubReadinessChecker{
 			err: errors.New("database unavailable"),
 		},
-		time.Second,
-	)
+		ReadinessTimeout: time.Second,
+	})
 
 	handler.ServeHTTP(recorder, request)
 

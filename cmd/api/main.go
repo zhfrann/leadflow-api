@@ -10,10 +10,12 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/zhfrann/leadflow-api/internal/auth"
 	"github.com/zhfrann/leadflow-api/internal/platform/config"
 	"github.com/zhfrann/leadflow-api/internal/platform/database"
 	"github.com/zhfrann/leadflow-api/internal/platform/httpx"
 	"github.com/zhfrann/leadflow-api/internal/platform/logging"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func main() {
@@ -52,9 +54,23 @@ func main() {
 		"max_connections", cfg.DatabaseMaxConns,
 	)
 
+	passwordHasher, err := auth.NewBcryptHasher(bcrypt.DefaultCost)
+	if err != nil {
+		logger.Error("initialize password hasher", "error", err)
+		os.Exit(1)
+	}
+
+	authRepository := auth.NewPostgresRepository(postgresPool)
+	authService := auth.NewService(authRepository, passwordHasher)
+	authHandler := auth.NewHandler(authService, logger)
+
 	server := &http.Server{
-		Addr:              cfg.HTTPAddress,
-		Handler:           httpx.NewHandler(postgresPool, cfg.DatabaseHealthTimeout),
+		Addr: cfg.HTTPAddress,
+		Handler: httpx.NewHandler(httpx.RouterConfig{
+			Database:         postgresPool,
+			ReadinessTimeout: cfg.DatabaseHealthTimeout,
+			RegisterHandler:  authHandler.Register,
+		}),
 		ReadHeaderTimeout: cfg.HTTPReadHeaderTimeout,
 		ReadTimeout:       cfg.HTTPReadTimeout,
 		WriteTimeout:      cfg.HTTPWriteTimeout,
