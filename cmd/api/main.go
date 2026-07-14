@@ -4,6 +4,7 @@ import (
 	"log"
 
 	"github.com/zhfrann/leadflow-api/internal/platform/config"
+	"github.com/zhfrann/leadflow-api/internal/platform/logging"
 )
 
 func main() {
@@ -12,5 +13,18 @@ func main() {
 		log.Fatalf("load configuration: %v", err)
 	}
 
-	log.Printf("LeadFlow API Starting on %s in %s mode", cfg.HTTPAddress, cfg.Environment)
+	logger, err := logging.New(logging.Config{
+		Environment: cfg.Environment,
+		Level:       cfg.LogLevel,
+		Service:     "leadflow-api",
+	})
+	if err != nil {
+		log.Fatalf("initialize logger: %v", err)
+	}
+
+	logger.Info(
+		"application starting",
+		"address", cfg.HTTPAddress,
+		"shutdown_timeout", cfg.ShutdownTimeout.String(),
+	)
 }
