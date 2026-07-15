@@ -14,6 +14,7 @@ type RouterConfig struct {
 	Database         ReadinessChecker
 	ReadinessTimeout time.Duration
 	RegisterHandler  http.HandlerFunc
+	LoginHandler     http.HandlerFunc
 }
 
 type statusResponse struct {
@@ -28,6 +29,10 @@ func NewHandler(cfg RouterConfig) http.Handler {
 
 	if cfg.RegisterHandler != nil {
 		mux.HandleFunc("POST /v1/auth/register", cfg.RegisterHandler)
+	}
+
+	if cfg.LoginHandler != nil {
+		mux.HandleFunc("POST /v1/auth/login", cfg.LoginHandler)
 	}
 
 	return RequestID(mux)

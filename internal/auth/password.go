@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"errors"
 	"fmt"
 
 	"golang.org/x/crypto/bcrypt"
@@ -26,6 +27,22 @@ func (h *BcryptHasher) Compare(passwordHash string, password string) error {
 	}
 
 	return nil
+}
+
+func (h *BcryptHasher) Verify(passwordHash string, password string) (bool, error) {
+	err := bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(password))
+
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, bcrypt.ErrMismatchedHashAndPassword):
+		return false, nil
+	default:
+		return false, fmt.Errorf(
+			"verify password: %w",
+			err,
+		)
+	}
 }
 
 func NewBcryptHasher(cost int) (*BcryptHasher, error) {

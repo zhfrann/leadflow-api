@@ -12,7 +12,7 @@ import (
 	"github.com/zhfrann/leadflow-api/internal/platform/httpx"
 )
 
-const maxRegisterRequestBodySize = 1 << 20 // Shifting 1 bit to the left 20 times, equivalent to 1x2^20 = 1.048.576 bits = 1 MiB
+const maxAuthRequestBodySize = 1 << 20 // Shifting 1 bit to the left 20 times, equivalent to 1x2^20 = 1.048.576 bits = 1 MiB
 
 type Registrar interface {
 	Register(ctx context.Context, input RegisterInput) (User, error)
@@ -49,7 +49,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(
 		w,
 		r.Body,
-		maxRegisterRequestBodySize,
+		maxAuthRequestBodySize,
 	)
 	defer r.Body.Close()
 

@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -15,6 +17,13 @@ import (
 const (
 	userEmailUniqueConstraint = "users_email_unique_idx"
 )
+
+type CredentialUser struct {
+	ID           int64
+	Email        string
+	PasswordHash string
+	CreatedAt    time.Time
+}
 
 type PostgresRepository struct {
 	pool *pgxpool.Pool
@@ -95,6 +104,38 @@ func (r *PostgresRepository) CreateUserWithWelcomeEmail(ctx context.Context, par
 
 	if err := tx.Commit(ctx); err != nil {
 		return User{}, fmt.Errorf("commit registration transaction: %w", err)
+	}
+
+	return user, nil
+}
+
+func (r *PostgresRepository) FindUserByEmail(ctx context.Context, email string) (CredentialUser, error) {
+	var user CredentialUser
+
+	err := r.pool.QueryRow(
+		ctx,
+		`
+			SELECT
+				id,
+				email,
+				password_hash,
+				created_at
+			FROM users
+			WHERE email = $1
+		`,
+		email,
+	).Scan(
+		&user.ID,
+		&user.Email,
+		&user.PasswordHash,
+		&user.CreatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return CredentialUser{}, errUserNotFound
+	}
+
+	if err != nil {
+		return CredentialUser{}, fmt.Errorf("find user by email: %w", err)
 	}
 
 	return user, nil
