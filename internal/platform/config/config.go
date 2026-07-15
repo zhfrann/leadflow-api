@@ -28,6 +28,25 @@ const (
 	defaultWorkerRetryDelay             = 10 * time.Second
 )
 
+const (
+	defaultWorkerPollInterval      = 1 * time.Second
+	defaultWorkerProcessingTimeout = 2 * time.Minute
+	defaultWorkerRecoveryInterval  = 30 * time.Second
+)
+
+var defaultWorkerRetryDelays = []time.Duration{
+	10 * time.Second,
+	30 * time.Second,
+	2 * time.Minute,
+	10 * time.Minute,
+}
+
+const (
+	defaultJWTIssuer    = "leadflow-api"
+	defaultJWTAudience  = "leadflow-client"
+	defaultJWTAccessTTL = 15 * time.Minute
+)
+
 type Config struct {
 	Environment             string
 	HTTPAddress             string
@@ -50,20 +69,11 @@ type Config struct {
 	WorkerRetryDelays       []time.Duration
 	WorkerProcessingTimeout time.Duration
 	WorkerRecoveryInterval  time.Duration
+	JWTSecret               string
+	JWTIssuer               string
+	JWTAudience             string
+	JWTAccessTTL            time.Duration
 }
-
-var defaultWorkerRetryDelays = []time.Duration{
-	10 * time.Second,
-	30 * time.Second,
-	2 * time.Minute,
-	10 * time.Minute,
-}
-
-const (
-	defaultWorkerPollInterval      = 1 * time.Second
-	defaultWorkerProcessingTimeout = 2 * time.Minute
-	defaultWorkerRecoveryInterval  = 30 * time.Second
-)
 
 func Load() (Config, error) {
 	readHeaderTimeout, err := getDurationEnv("HTTP_READ_HEADER_TIMEOUT", defaultHTTPReadHeaderTimeout)
@@ -131,6 +141,11 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
+	jwtAccessTTL, err := getDurationEnv("JWT_ACCESS_TTL", defaultJWTAccessTTL)
+	if err != nil {
+		return Config{}, err
+	}
+
 	cfg := Config{
 		Environment:             getEnv("APP_ENV", defaultEnvironment),
 		HTTPAddress:             getEnv("HTTP_ADDRESS", defaultHTTPAddress),
@@ -153,6 +168,10 @@ func Load() (Config, error) {
 		WorkerRetryDelays:       workerRetryDelays,
 		WorkerProcessingTimeout: workerProcessingTimeout,
 		WorkerRecoveryInterval:  workerRecoveryInterval,
+		JWTSecret:               strings.TrimSpace(os.Getenv("JWT_SECRET")),
+		JWTIssuer:               getEnv("JWT_ISSUER", defaultJWTIssuer),
+		JWTAudience:             getEnv("JWT_AUDIENCE", defaultJWTAudience),
+		JWTAccessTTL:            jwtAccessTTL,
 	}
 
 	if err := cfg.validate(); err != nil {
@@ -251,6 +270,18 @@ func (c Config) validate() error {
 	case "debug", "info", "warn", "error":
 	default:
 		return fmt.Errorf("LOG_LEVEL must be debug, info, warn, or error")
+	}
+
+	if strings.TrimSpace(c.JWTIssuer) == "" {
+		return fmt.Errorf("JWT_ISSUER must not be empty")
+	}
+
+	if strings.TrimSpace(c.JWTAudience) == "" {
+		return fmt.Errorf("JWT_AUDIENCE must not be empty")
+	}
+
+	if c.JWTAccessTTL <= 0 {
+		return fmt.Errorf("JWT_ACCESS_TTL must be greater than zero")
 	}
 
 	return nil

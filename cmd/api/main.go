@@ -60,9 +60,40 @@ func main() {
 		os.Exit(1)
 	}
 
+	jwtManager, err := auth.NewJWTManager(
+		cfg.JWTSecret,
+		cfg.JWTIssuer,
+		cfg.JWTAudience,
+		cfg.JWTAccessTTL,
+	)
+	if err != nil {
+		logger.Error(
+			"initialize JWT manager",
+			"error", err,
+		)
+		os.Exit(1)
+	}
+
+	dummyPasswordHash, err := passwordHasher.Hash("leadflow-dummy-login-password")
+	if err != nil {
+		logger.Error(
+			"create dummy password hash",
+			"error", err,
+		)
+		os.Exit(1)
+	}
+
 	authRepository := auth.NewPostgresRepository(postgresPool)
 	authService := auth.NewService(authRepository, passwordHasher)
 	authHandler := auth.NewHandler(authService, logger)
+
+	loginService := auth.NewLoginService(
+		authRepository,
+		passwordHasher,
+		jwtManager,
+		dummyPasswordHash,
+	)
+	loginHandler := auth.NewLoginHandler(loginService, logger)
 
 	server := &http.Server{
 		Addr: cfg.HTTPAddress,
@@ -70,6 +101,7 @@ func main() {
 			Database:         postgresPool,
 			ReadinessTimeout: cfg.DatabaseHealthTimeout,
 			RegisterHandler:  authHandler.Register,
+			LoginHandler:     loginHandler.Login,
 		}),
 		ReadHeaderTimeout: cfg.HTTPReadHeaderTimeout,
 		ReadTimeout:       cfg.HTTPReadTimeout,
